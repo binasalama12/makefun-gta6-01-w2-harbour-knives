@@ -1,1 +1,6 @@
-[{"file":"1-cover.jpg","width":1280,"height":720},{"file":"2-title.jpg","width":1280,"height":720},{"file":"3-fence.jpg","width":1280,"height":720},{"file":"4-end.jpg","width":1280,"height":720}]
+[
+  { "file": "1-cover.jpg", "width": 1280, "height": 720, "scene": "cover" },
+  { "file": "2-title.jpg", "width": 1280, "height": 720, "scene": "title" },
+  { "file": "3-fence.jpg", "width": 1280, "height": 720, "scene": "fence" },
+  { "file": "4-end.jpg", "width": 1280, "height": 720, "scene": "end" }
+]

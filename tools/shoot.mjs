@@ -83,8 +83,7 @@ try {
   await mkdir(join(root, 'screenshots'), { recursive: true });
 
   for (const shot of shots) {
-    const scene = shot.file.replace(/^\d+-/, '').replace(/\.jpg$/i, '');
-    await command('Page.navigate', { url: `${address}/?shot=${encodeURIComponent(scene)}&seed=1` });
+    await command('Page.navigate', { url: `${address}/?shot=${encodeURIComponent(shot.scene)}&seed=1` });
     await new Promise(resolve => setTimeout(resolve, 2100));
     const image = await command('Page.captureScreenshot', {
       format: 'jpeg', quality: 88, fromSurface: true
