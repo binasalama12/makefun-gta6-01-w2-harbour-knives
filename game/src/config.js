@@ -1,0 +1,3 @@
+export const JOBS=[['Dockside Customs Shed','Dockside',-48,34],['The Meridian Casino Vault','Meridian Strip',8,34],['Ferry Terminal Strongroom','Ferry Quarter',52,0],['Lighthouse Keeper’s Cache','Cannery Row',-38,-34],['The Azahar Mint','North Causeway',34,-34],['The Harbourmaster’s Barge','North Causeway',56,-53]];
+export const UPGRADES=[['Rain Slicks','Wet-road grip improves.','grip'],['Silent Running','Wanted rises more slowly.','silent'],['Deep Bags','Carry two extra loot bags.','bags'],['Getaway Map','Police and escape markers show at longer range.','map'],['Soft Hands','Scout points take less time to case.','soft']];
+export const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
