@@ -3,9 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const sourceRoot = resolve(
-  process.env.MAKEFUN_BOT_DIR || dirname(fileURLToPath(import.meta.url)),
-);
+const sourceRoot = resolve(process.env.MAKEFUN_BOT_DIR ?? dirname(fileURLToPath(import.meta.url)));
 const outputDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
 mkdirSync(outputDir, { recursive: true });
 cpSync(resolve(sourceRoot, 'game'), resolve(outputDir, 'game'), { recursive: true });
@@ -20,6 +18,4 @@ const dossier = buildDossier(outputDir, {
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
 });
-const dossierPath = resolve(outputDir, 'dossier.json');
-writeFileSync(dossierPath, dossier);
-console.log(`Wrote dossier: ${dossierPath}`);
+writeFileSync(resolve(outputDir, 'dossier.json'), dossier);

@@ -1,19 +1,100 @@
-import {spawn} from 'node:child_process';
-import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';
-const root=resolve('.'),port=Number(process.env.PORT||8091),chrome=join(process.env.HOME,'.cache/ms-playwright/chromium-1194/chrome-linux/chrome'),profile=await mkdtemp(join(tmpdir(),'hk-chrome-'));
-const server=spawn('node',['serve.ts'],{cwd:root,env:{...process.env,PORT:String(port)},stdio:'ignore'});
-let browser,ws,seq=0,pending=new Map();
-try{
- for(let i=0;i<50;i++){try{await fetch(`http://127.0.0.1:${port}`);break}catch{await new Promise(r=>setTimeout(r,100))}}
- browser=spawn(chrome,['--headless=new','--use-angle=swiftshader','--enable-unsafe-swiftshader','--no-sandbox','--window-size=1280,720','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
- let active='';for(let i=0;i<100;i++){try{active=(await readFile(join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];if(active)break}catch{}await new Promise(r=>setTimeout(r,100))}if(!active)throw Error('Chromium did not expose CDP');
- let targets=[];for(let i=0;i<40;i++){try{targets=await(await fetch(`http://127.0.0.1:${active}/json/list`)).json();if(targets.some(x=>x.type==='page'))break}catch{}await new Promise(r=>setTimeout(r,100))}
- let page=targets.find(x=>x.type==='page');ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject});
- ws.onmessage=e=>{let m=JSON.parse(e.data),p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result)}};
- const cmd=(method,params={})=>new Promise((resolve,reject)=>{let id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}))});
- const evaljs=async(expression)=>{let r=await cmd('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.text);return r.result?.value};
- await cmd('Page.enable');await cmd('Runtime.enable');await cmd('Emulation.setDeviceMetricsOverride',{width:1280,height:720,deviceScaleFactor:1,mobile:false});
- for(const [shot,file] of [['cover','1-cover.jpg'],['title','2-title.jpg'],['fence','3-fence.jpg'],['end','4-end.jpg']]){await cmd('Page.navigate',{url:`http://127.0.0.1:${port}/?shot=${shot}&seed=1`});await new Promise(r=>setTimeout(r,2100));let data=(await cmd('Page.captureScreenshot',{format:'jpeg',quality:88,fromSurface:true})).data;await writeFile(join(root,'screenshots',file),Buffer.from(data,'base64'));console.log(file,Buffer.byteLength(data,'base64'));}
- await cmd('Page.navigate',{url:`http://127.0.0.1:${port}/`});await new Promise(r=>setTimeout(r,1100));await evaljs("document.dispatchEvent(new KeyboardEvent('keydown',{code:'Enter',key:'Enter',bubbles:true}))");await new Promise(r=>setTimeout(r,300));let objective=await evaljs("document.querySelector('#objective').textContent");let a=Number(await evaljs("document.querySelector('#speed').textContent"));await evaljs("for(let i=0;i<40;i++)document.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyW',key:'w',bubbles:true}))");await new Promise(r=>setTimeout(r,1700));let b=Number(await evaljs("document.querySelector('#speed').textContent"));console.log(JSON.stringify({objective,speedBefore:a,speedAfter:b,started:await evaljs("!document.querySelector('#hud').classList.contains('hidden')")}));if(!objective||a===b)throw Error('Live interaction probe failed');
-}finally{try{ws?.close()}catch{}browser?.kill('SIGTERM');server.kill('SIGTERM');await rm(profile,{recursive:true,force:true})}
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+const root = resolve('.');
+const port = Number(process.env.PORT || 8091);
+const address = `http://127.0.0.1:${port}`;
+const chromePath = join(homedir(), '.cache', 'ms-playwright', 'chromium-1194', 'chrome-linux', 'chrome');
+const profile = await mkdtemp(join(tmpdir(), 'harbour-shots-'));
+const shots = JSON.parse(await readFile(join(root, 'shots.json'), 'utf8'));
+const server = spawn('node', ['serve.ts'], {
+  cwd: root,
+  env: { ...process.env, PORT: String(port) },
+  stdio: 'ignore'
+});
+let browser;
+let socket;
+let sequence = 0;
+const waiting = new Map();
+
+try {
+  let serverReady = false;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    try {
+      const response = await fetch(address);
+      if (response.ok) { serverReady = true; break; }
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (!serverReady) throw new Error('Game server did not become ready');
+
+  browser = spawn(chromePath, [
+    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
+    '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+    '--window-size=1280,720', '--remote-debugging-port=0',
+    `--user-data-dir=${profile}`, 'about:blank'
+  ], { stdio: 'ignore' });
+
+  let debugPort;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      debugPort = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\\n')[0].trim();
+      if (debugPort) break;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (!debugPort) throw new Error('Chromium did not expose its DevTools port');
+
+  let pages = [];
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      pages = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
+      if (pages.some(page => page.type === 'page')) break;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const page = pages.find(target => target.type === 'page');
+  if (!page) throw new Error('Chromium page target was not found');
+  socket = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  socket.addEventListener('message', event => {
+    const message = JSON.parse(event.data);
+    const task = waiting.get(message.id);
+    if (!task) return;
+    waiting.delete(message.id);
+    if (message.error) task.reject(new Error(message.error.message));
+    else task.resolve(message.result);
+  });
+
+  const command = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = ++sequence;
+    waiting.set(id, { resolve, reject });
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+  await command('Page.enable');
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1280, height: 720, deviceScaleFactor: 1, mobile: false
+  });
+  await mkdir(join(root, 'screenshots'), { recursive: true });
+
+  for (const shot of shots) {
+    const scene = shot.file.replace(/^\d+-/, '').replace(/\.jpg$/i, '');
+    await command('Page.navigate', { url: `${address}/?shot=${encodeURIComponent(scene)}&seed=1` });
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    const image = await command('Page.captureScreenshot', {
+      format: 'jpeg', quality: 88, fromSurface: true
+    });
+    await writeFile(join(root, 'screenshots', shot.file), Buffer.from(image.data, 'base64'));
+    console.log(`Saved ${shot.file} (${shot.width}x${shot.height})`);
+  }
+} finally {
+  try { socket?.close(); } catch {}
+  browser?.kill('SIGTERM');
+  server.kill('SIGTERM');
+  await rm(profile, { recursive: true, force: true });
+}
